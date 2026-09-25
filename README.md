@@ -20,5 +20,5 @@ npx --yes serve .
 
 ## Deployment
 
+- **Cloudflare Pages**: [https://yerakimbook.pages.dev](https://yerakimbook.pages.dev)
 - **GitHub Pages**: [https://kimbolt1109.github.io/yerakimbook/](https://kimbolt1109.github.io/yerakimbook/)
-- **Custom Domain**: `yerakimbook.is-a.dev` (via [is-a.dev](https://is-a.dev))
