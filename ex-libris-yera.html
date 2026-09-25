@@ -1265,8 +1265,10 @@ async function initCloudSync(){
       const localIsDefault=localBooks.length===1&&localBooks[0].id==='first-sorekara'&&localBooks[0].notes.length===0&&!localBooks[0].report;
       const cloudTime=new Date(cloudData.exported||json.updatedAt||0).getTime();
       const localMod=new Date(localStorage.getItem('yera-library/last-modified')||0).getTime();
+      const lastSync=new Date(localStorage.getItem('yera-library/last-sync')||0).getTime();
+      const cloudIsMine=lastSync>0&&cloudTime<=lastSync;
 
-      if(localIsDefault || cloudTime>localMod){
+      if(localIsDefault || (cloudTime>localMod && !cloudIsMine)){
         await applyCloudData(cloudData);
         cloudSyncStatus='synced';
         renderStorageNote();
@@ -1610,7 +1612,8 @@ function freeDraw(){
 }
 function cancelDraw(){
   if($('#drawModal').hidden||Dr.saving) return;
-  if(Dr.dirty&&!Dr.asking){ Dr.asking=true; renderDrawEnd(); const k=$('[data-action="d-keep"]'); if(k) k.focus(); return; }
+  if(Dr.asking){ Dr.asking=false; renderDrawEnd(); return; }
+  if(Dr.dirty){ Dr.asking=true; renderDrawEnd(); const k=$('[data-action="d-keep"]'); if(k) k.focus(); return; }
   Dr.dirty=false; popModal('drawModal'); freeDraw();
 }
 async function exportInk(){
@@ -1983,7 +1986,7 @@ document.addEventListener('submit',e=>{
   const f=e.target; e.preventDefault();
   switch(f.dataset.form){
     case 'hero-log':{ const b=hero.info&&hero.info.book; if(!b||!byId(b.id)) return; setPage(b,$('#heroPage').value); commit(); toast('Page '+b.current+' saved.'); break; }
-    case 'page':{ const b=byId(ui.openId); if(!b) return; setPage(b,$('#spPage').value); commit({spread:'left'}); break; }
+    case 'page':{ const b=byId(ui.openId); if(!b) return; setPage(b,$('#spPage').value); commit({spread:'left'}); const np=$('#notePage'); if(np&&ui.notePage==null) np.value=(b.status==='reading'&&b.current)?b.current:''; break; }
     case 'note':{
       const b=byId(ui.openId); if(!b) return; const t=$('#noteText'), text=t.value.trim();
       if(!text){ t.focus(); t.setAttribute('placeholder','Write something first, then add it'); return; }
