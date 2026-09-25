@@ -1,3 +1,8 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ex Libris Yera</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -773,8 +778,13 @@ let saveTimer=0;
 function save(){ clearTimeout(saveTimer); saveTimer=setTimeout(saveNow,250); }
 function saveNow(){
   clearTimeout(saveTimer);
-  try{ localStorage.setItem(KEY,JSON.stringify(state)); storageOK=true; }catch(e){ storageOK=false; }
+  try{
+    localStorage.setItem(KEY,JSON.stringify(state));
+    localStorage.setItem('yera-library/last-modified',new Date().toISOString());
+    storageOK=true;
+  }catch(e){ storageOK=false; }
   renderStorageNote();
+  scheduleCloudSync();
 }
 addEventListener('pagehide',saveNow);
 
@@ -1167,7 +1177,114 @@ function renderReports(){
   }).join('')+'</div>';
 }
 
-function renderStorageNote(){ $('#storageNote').textContent=storageOK?'Saved in this browser.':'This browser isn’t saving changes. Make a backup before you leave.'; }
+let cloudSyncTimer=0, cloudSyncing=false, cloudSyncStatus='idle';
+function renderStorageNote(){
+  const el=$('#storageNote'); if(!el) return;
+  if(!storageOK){ el.textContent='저장 오류'; return; }
+  if(cloudSyncStatus==='syncing') el.textContent='☁️ 클라우드 동기화 중...';
+  else if(cloudSyncStatus==='synced') el.textContent='☁️ 클라우드 동기화됨';
+  else if(cloudSyncStatus==='error') el.textContent='로컬 저장됨 (오프라인)';
+  else el.textContent='☁️ 클라우드 연동됨';
+}
+async function serializeLibrary(){
+  const out={app:'yera-library',version:4,exported:new Date().toISOString(),state:state,media:{}};
+  for(const b of (state.books||[])){
+    if(b.design==='photo'){
+      const v=await media.get('cover:'+b.id);
+      if(v&&v.photo) out.media['cover:'+b.id]={photo:await toDataURL(v.photo)};
+    }
+    for(const n of (b.notes||[])){
+      if(n.type==='text') continue;
+      const v=await media.get(n.id); if(!v) continue;
+      out.media[n.id]={ratio:v.ratio,strokes:v.strokes||[],photo:v.photo?await toDataURL(v.photo):null,ink:v.ink?await toDataURL(v.ink):null};
+    }
+  }
+  return out;
+}
+async function applyCloudData(r){
+  if(!r||!r.state||!Array.isArray(r.state.books)) return;
+  if(r.media){
+    for(const [id,v] of Object.entries(r.media)){
+      let rec;
+      if(id.indexOf('cover:')===0) rec={photo:v&&v.photo?fromDataURL(v.photo):null,t:Date.now()};
+      else rec={ratio:clamp(+(v&&v.ratio)||.75,.2,5),strokes:v&&Array.isArray(v.strokes)?v.strokes:[],photo:v&&v.photo?fromDataURL(v.photo):null,ink:v&&v.ink?fromDataURL(v.ink):null,t:Date.now()};
+      await media.set(id,rec);
+    }
+  }
+  state=normalize(r.state);
+  const ts=r.exported||new Date().toISOString();
+  try{
+    localStorage.setItem(KEY,JSON.stringify(state));
+    localStorage.setItem('yera-library/last-modified',ts);
+    localStorage.setItem('yera-library/last-sync',ts);
+    storageOK=true;
+  }catch(e){}
+  Array.from(urlCache.keys()).forEach(invalidate); Array.from(coverURLs.keys()).forEach(invalidateCover);
+  hero.pick=null; hero.sig='';
+  renderHero(); renderShelf(); renderNotes(); renderReports();
+  if(ui.openId){
+    if(byId(ui.openId)) renderSpread();
+    else closeBook();
+  }
+}
+async function pushToCloud(){
+  if(cloudSyncing) return;
+  cloudSyncing=true; cloudSyncStatus='syncing'; renderStorageNote();
+  try{
+    const payload=await serializeLibrary();
+    const res=await fetch('/api/sync',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    if(res.ok){
+      cloudSyncStatus='synced';
+      localStorage.setItem('yera-library/last-sync',payload.exported);
+    } else {
+      cloudSyncStatus='error';
+    }
+  }catch(e){
+    cloudSyncStatus='error';
+  }finally{
+    cloudSyncing=false;
+    renderStorageNote();
+  }
+}
+function scheduleCloudSync(){
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer=setTimeout(pushToCloud,800);
+}
+async function initCloudSync(){
+  try{
+    const res=await fetch('/api/sync');
+    if(!res.ok) return;
+    const json=await res.json();
+    if(json&&json.ok&&json.data){
+      const cloudData=json.data;
+      const localBooks=state.books||[];
+      const localIsDefault=localBooks.length===1&&localBooks[0].id==='first-sorekara'&&localBooks[0].notes.length===0&&!localBooks[0].report;
+      const cloudTime=new Date(cloudData.exported||json.updatedAt||0).getTime();
+      const localMod=new Date(localStorage.getItem('yera-library/last-modified')||0).getTime();
+
+      if(localIsDefault || cloudTime>localMod){
+        await applyCloudData(cloudData);
+        cloudSyncStatus='synced';
+        renderStorageNote();
+        return;
+      } else if(localMod>cloudTime){
+        scheduleCloudSync();
+        return;
+      }
+    } else if(state.books.length>0){
+      scheduleCloudSync();
+    }
+    cloudSyncStatus='synced';
+    renderStorageNote();
+  }catch(e){
+    cloudSyncStatus='error';
+    renderStorageNote();
+  }
+}
 
 /* ================= render all ================= */
 function commit(opts){
@@ -1908,6 +2025,10 @@ document.addEventListener('change',e=>{
 /* ================= start ================= */
 renderHero(); renderShelf(); renderNotes(); renderReports(); renderStorageNote();
 armReveals();
+initCloudSync();
+window.addEventListener('focus', () => { initCloudSync(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') initCloudSync(); });
+setInterval(initCloudSync, 60000);
 /* tidy up drawings, pictures and cover photos nothing uses any more (older than a day, so other open tabs are safe) */
 (async()=>{
   if(!loadedFromStorage) return;
