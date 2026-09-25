@@ -20,5 +20,6 @@ npx --yes serve .
 
 ## Deployment
 
-- **Cloudflare Pages**: [https://yerakimbook.pages.dev](https://yerakimbook.pages.dev)
+- **Cloudflare Pages (Primary)**: [https://yerabook.pages.dev](https://yerabook.pages.dev)
+- **Cloudflare Pages (Alt)**: [https://yerakimbook.pages.dev](https://yerakimbook.pages.dev)
 - **GitHub Pages**: [https://kimbolt1109.github.io/yerakimbook/](https://kimbolt1109.github.io/yerakimbook/)
